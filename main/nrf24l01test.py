@@ -24,8 +24,8 @@ elif usys.platform == "esp32":  # Software SPI
     spi = SoftSPI(sck=Pin(25), mosi=Pin(33), miso=Pin(32))
     cfg = {"spi": spi, "csn": 26, "ce": 27}
 elif usys.platform == "rp2":  # Hardware SPI with explicit pin definitions
-    spi = SPI(0, sck=Pin(2), mosi=Pin(3), miso=Pin(4))
-    cfg = {"spi": spi, "csn": 5, "ce": 6}
+    spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
+    cfg = {"spi": spi, "csn": 17, "ce": 14}
 else:
     raise ValueError("Unsupported platform {}".format(usys.platform))
 
