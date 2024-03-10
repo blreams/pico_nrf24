@@ -51,7 +51,7 @@ NOP = const(0xFF)  # use to read STATUS register
 
 
 class NRF24L01:
-    def __init__(self, spi, cs, ce, channel=46, payload_size=16):
+    def __init__(self, spi, cs, ce, channel=46, payload_size=16, baudrate=4000000):
         assert payload_size <= 32
 
         self.buf = bytearray(1)
@@ -62,7 +62,7 @@ class NRF24L01:
         self.ce = ce
 
         # init the SPI bus and pins
-        self.init_spi(4000000)
+        self.init_spi(baudrate)
 
         # reset everything
         ce.init(ce.OUT, value=0)
@@ -80,9 +80,10 @@ class NRF24L01:
         # disable dynamic payloads
         self.reg_write(DYNPD, 0)
 
-        # auto retransmit delay: 1750us
-        # auto retransmit count: 8
-        self.reg_write(SETUP_RETR, (6 << 4) | 8)
+        # these are the defaults in rf24
+        # auto retransmit delay: 1500us
+        # auto retransmit count: 15
+        self.reg_write(SETUP_RETR, (5 << 4) | 15)
 
         # set rf power and speed
         self.set_power_speed(POWER_3, SPEED_250K)  # Best for point to point links
@@ -108,12 +109,18 @@ class NRF24L01:
         else:
             self.spi.init(master, baudrate=baudrate, polarity=0, phase=0)
 
-    def reg_read(self, reg):
+    def reg_read(self, reg, size=1, debug=False):
+        buf = bytearray(size)
         self.cs(0)
         self.spi.readinto(self.buf, reg)
-        self.spi.readinto(self.buf)
+        self.spi.readinto(buf)
         self.cs(1)
-        return self.buf[0]
+        val = 0
+        for i in range(size):
+            val += buf[i] << (i * 8)
+        if debug:
+            print(f"reg{reg}=0x{val:x}")
+        return val
 
     def reg_write_bytes(self, reg, buf):
         self.cs(0)
@@ -214,12 +221,18 @@ class NRF24L01:
         return buf
 
     # blocking wait for tx complete
-    def send(self, buf, timeout=500):
+    # blr: These modifications were to fix a problem with tranmit overlapping spi traffic
+    def send(self, buf, timeout=750):
+        count = 0
         self.send_start(buf)
         start = utime.ticks_ms()
         result = None
+        utime.sleep_us(2500)  # blr: allows time for transmission to occur without spi traffic asserting csn
         while result is None and utime.ticks_diff(utime.ticks_ms(), start) < timeout:
+            count += 1
             result = self.send_done()  # 1 == success, 2 == fail
+            utime.sleep_us(800)  # blr: without this delay, spi traffic csn assertion interferes with ack receive
+        print(f"count={count}")
         if result == 2:
             raise OSError("send failed")
 
