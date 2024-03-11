@@ -1,0 +1,2 @@
+https://forum.arduino.cc/t/nrf24l01-and-rf24-lib-ack-failure/87011/17
+https://github.com/maniacbug/RF24/issues/21
