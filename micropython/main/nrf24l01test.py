@@ -101,6 +101,7 @@ def responder():
     ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
     spi = cfg["spi"]
     nrf = NRF24L01(spi, csn, ce, payload_size=8)
+    gpio10 = Pin(10, mode=Pin.OUT, value=0)
 
     nrf.open_tx_pipe(pipes[1])
     nrf.open_rx_pipe(1, pipes[0])
@@ -110,6 +111,7 @@ def responder():
 
     while True:
         if nrf.any():
+            gpio10.value(1)
             while nrf.any():
                 buf = nrf.recv()
                 millis, led_state = struct.unpack("ii", buf)
@@ -129,6 +131,7 @@ def responder():
                 nrf.send(struct.pack("i", millis))
             except OSError:
                 pass
+            gpio10.value(0)
             print("sent response")
             nrf.start_listening()
 
