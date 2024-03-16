@@ -44,7 +44,7 @@ def initiator():
     nrf.open_rx_pipe(1, pipes[1])
     nrf.start_listening()
 
-    num_needed = 16
+    num_needed = 1
     num_successes = 0
     num_failures = 0
     led_state = 0
