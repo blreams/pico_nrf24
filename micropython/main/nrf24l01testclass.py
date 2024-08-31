@@ -4,7 +4,7 @@ import sys
 import struct
 import time
 from machine import Pin, SPI, SoftSPI
-from drivers.nrf24l01 import NRF24L01
+#from drivers.nrf24l01 import NRF24L01
 from micropython import const
 
 # Responder pause between receiving data and checking for further packets.
@@ -14,136 +14,164 @@ _RX_POLL_DELAY = const(15)
 # initiator may be a slow device. Value tested with Pyboard, ESP32 and ESP8266.
 _RESPONDER_SEND_DELAY = const(10)
 
-if sys.platform == "pyboard":
-    spi = SPI(2)  # miso : Y7, mosi : Y8, sck : Y6
-    cfg = {"spi": spi, "csn": "Y5", "ce": "Y4"}
-elif sys.platform == "esp8266":  # Hardware SPI
-    spi = SPI(1)  # miso : 12, mosi : 13, sck : 14
-    cfg = {"spi": spi, "csn": 4, "ce": 5}
-elif sys.platform == "esp32":  # Software SPI
-    spi = SoftSPI(sck=Pin(25), mosi=Pin(33), miso=Pin(32))
-    cfg = {"spi": spi, "csn": 26, "ce": 27}
-elif sys.platform == "rp2":  # Hardware SPI with explicit pin definitions
-    spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
-    cfg = {"spi": spi, "csn": 17, "ce": 14}
-else:
-    raise ValueError(f"Unsupported platform {sys.platform}")
-
 # Addresses are in little-endian format. They correspond to big-endian
 # 0xf0f0f0f0e1, 0xf0f0f0f0d2
 pipes = (b"\xe1\xf0\xf0\xf0\xf0", b"\xd2\xf0\xf0\xf0\xf0")
 
-
 class NrfTest():
-    def __init__(self, role, ce_pin, channel, power, speed):
-        self.role = role
-        self.ce_pin = ce_pin
+    def __init__(self, driver_name, ce_gpio, channel, power, speed):
+        self.driver_name = driver_name
+        self.ce_gpio = ce_gpio
         self.channel = channel
-        self.power = power
-        self.speed = speed
+        self.power_string = power
+        self.speed_string = speed
+        self.import_driver()
+        self.init_spi()
+        self.init_nrf()
+        self.report()
 
-
-def initiator():
-    csn = Pin(cfg["csn"], mode=Pin.OUT, value=1)
-    ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
-    spi = cfg["spi"]
-    nrf = NRF24L01(spi, csn, ce, payload_size=8)
-
-    nrf.open_tx_pipe(pipes[0])
-    nrf.open_rx_pipe(1, pipes[1])
-    nrf.start_listening()
-
-    num_needed = 1
-    num_successes = 0
-    num_failures = 0
-    led_state = 0
-
-    print("NRF24L01 initiator mode, sending %d packets..." % num_needed)
-
-    while num_successes < num_needed and num_failures < num_needed:
-        # stop listening and send packet
-        nrf.stop_listening()
-        millis = time.ticks_ms()
-        led_state = max(1, (led_state << 1) & 0x0F)
-        print("sending:", millis, led_state)
+    def import_driver(self):
         try:
-            nrf.send(struct.pack("ii", millis, led_state))
-        except OSError:
-            pass
+            self.driver = getattr(__import__(f"drivers.{self.driver_name}"), self.driver_name)
+        except AttributeError:
+            print(f"Unable to import driver {self.driver_name}")
 
-        # start listening again
-        nrf.start_listening()
+        try:
+            self.power = getattr(self.driver, self.power_string)
+        except AttributeError:
+            print(f"Unable to get attribute {self.power_string}")
 
-        # wait for response, with 250ms timeout
-        start_time = time.ticks_ms()
-        timeout = False
-        while not nrf.any() and not timeout:
-            if time.ticks_diff(time.ticks_ms(), start_time) > 250:
-                timeout = True
+        try:
+            self.speed = getattr(self.driver, self.speed_string)
+        except AttributeError:
+            print(f"Unable to get attribute {self.speed_string}")
 
-        if timeout:
-            print("failed, response timed out")
-            num_failures += 1
+        self.NRF24L01 = getattr(self.driver, "NRF24L01")
 
+    def init_spi(self):
+        if sys.platform == "pyboard":
+            spi = SPI(2)  # miso : Y7, mosi : Y8, sck : Y6
+            cfg = {"spi": spi, "csn": "Y5", "ce": "Y4"}
+        elif sys.platform == "esp8266":  # Hardware SPI
+            spi = SPI(1)  # miso : 12, mosi : 13, sck : 14
+            cfg = {"spi": spi, "csn": 4, "ce": 5}
+        elif sys.platform == "esp32":  # Software SPI
+            spi = SoftSPI(sck=Pin(25), mosi=Pin(33), miso=Pin(32))
+            cfg = {"spi": spi, "csn": 26, "ce": 27}
+        elif sys.platform == "rp2":  # Hardware SPI with explicit pin definitions
+            spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
+            cfg = {"spi": spi, "csn": 17, "ce": 14}
         else:
-            # recv packet
-            (got_millis,) = struct.unpack("i", nrf.recv())
+            raise ValueError(f"Unsupported platform {sys.platform}")
 
-            # print response and round-trip delay
-            print(
-                "got response:",
-                got_millis,
-                "(delay",
-                time.ticks_diff(time.ticks_ms(), got_millis),
-                "ms)",
-            )
-            num_successes += 1
+        cfg["ce"] = self.ce_gpio
+        self.spi = spi
+        self.cfg = cfg
 
-        # delay then loop
-        time.sleep_ms(250)
+    def init_nrf(self):
+        csn = Pin(self.cfg["csn"], mode=Pin.OUT, value=1)
+        ce = Pin(self.cfg["ce"], mode=Pin.OUT, value=0)
+        spi = self.cfg["spi"]
+        self.nrf = self.NRF24L01(spi, csn, ce, payload_size=8, channel=self.channel)
+        self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
+        self.nrf.set_power_speed(self.power, self.speed)
 
-    print("initiator finished sending; successes=%d, failures=%d" % (num_successes, num_failures))
+    def initiator(self):
+        self.nrf.open_tx_pipe(pipes[0])
+        self.nrf.open_rx_pipe(1, pipes[1])
+        self.nrf.start_listening()
 
+        num_needed = 1
+        num_successes = 0
+        num_failures = 0
+        led_state = 0
 
-def responder():
-    csn = Pin(cfg["csn"], mode=Pin.OUT, value=1)
-    ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
-    spi = cfg["spi"]
-    nrf = NRF24L01(spi, csn, ce, payload_size=8)
-    gpio10 = Pin(10, mode=Pin.OUT, value=0)
+        print("NRF24L01 initiator mode, sending %d packets..." % num_needed)
 
-    nrf.open_tx_pipe(pipes[1])
-    nrf.open_rx_pipe(1, pipes[0])
-    nrf.start_listening()
-
-    print("NRF24L01 responder mode, waiting for packets... (ctrl-C to stop)")
-
-    while True:
-        if nrf.any():
-            gpio10.value(1)
-            while nrf.any():
-                buf = nrf.recv()
-                millis, led_state = struct.unpack("ii", buf)
-                print("received:", millis, led_state)
-                for led in leds:
-                    if led_state & 1:
-                        led.on()
-                    else:
-                        led.off()
-                    led_state >>= 1
-                time.sleep_ms(_RX_POLL_DELAY)
-
-            # Give initiator time to get into receive mode.
-            time.sleep_ms(_RESPONDER_SEND_DELAY)
-            nrf.stop_listening()
+        while num_successes < num_needed and num_failures < num_needed:
+            # stop listening and send packet
+            self.nrf.stop_listening()
+            millis = time.ticks_ms()
+            led_state = max(1, (led_state << 1) & 0x0F)
+            print("sending:", millis, led_state)
             try:
-                nrf.send(struct.pack("i", millis))
+                self.nrf.send(struct.pack("ii", millis, led_state))
             except OSError:
                 pass
-            gpio10.value(0)
-            print("sent response")
-            nrf.start_listening()
 
+            # start listening again
+            self.nrf.start_listening()
+
+            # wait for response, with 250ms timeout
+            start_time = time.ticks_ms()
+            timeout = False
+            while not self.nrf.any() and not timeout:
+                if time.ticks_diff(time.ticks_ms(), start_time) > 250:
+                    timeout = True
+
+            if timeout:
+                print("failed, response timed out")
+                num_failures += 1
+
+            else:
+                # recv packet
+                (got_millis,) = struct.unpack("i", self.nrf.recv())
+
+                # print response and round-trip delay
+                print(
+                    "got response:",
+                    got_millis,
+                    "(delay",
+                    time.ticks_diff(time.ticks_ms(), got_millis),
+                    "ms)",
+                )
+                num_successes += 1
+
+            # delay then loop
+            time.sleep_ms(250)
+
+        print("initiator finished sending; successes=%d, failures=%d" % (num_successes, num_failures))
+
+    def responder(self):
+        self.nrf.open_tx_pipe(pipes[1])
+        self.nrf.open_rx_pipe(1, pipes[0])
+        self.nrf.start_listening()
+
+        print("NRF24L01 responder mode, waiting for packets... (ctrl-C to stop)")
+
+        while True:
+            if self.nrf.any():
+                self.gpio10.value(1)
+                while self.nrf.any():
+                    buf = self.nrf.recv()
+                    millis, led_state = struct.unpack("ii", buf)
+                    print("received:", millis, led_state)
+                    for led in leds:
+                        if led_state & 1:
+                            led.on()
+                        else:
+                            led.off()
+                        led_state >>= 1
+                    time.sleep_ms(_RX_POLL_DELAY)
+
+                # Give initiator time to get into receive mode.
+                time.sleep_ms(_RESPONDER_SEND_DELAY)
+                self.nrf.stop_listening()
+                try:
+                    self.nrf.send(struct.pack("i", millis))
+                except OSError:
+                    pass
+                self.gpio10.value(0)
+                print("sent response")
+                self.nrf.start_listening()
+
+    def report(self):
+        print("NRF24L01 test module loaded")
+        print("NRF24L01 pinout for test:")
+        print("    CE on", self.cfg["ce"])
+        print("    CSN on", self.cfg["csn"])
+        print("    SPI on", self.cfg["spi"])
+        print("run <object>.responder() on responder, then <object>.initiator() on initiator")
 
 try:
     import pyb
@@ -151,10 +179,3 @@ try:
     leds = [pyb.LED(i + 1) for i in range(4)]
 except:
     leds = []
-
-print("NRF24L01 test module loaded")
-print("NRF24L01 pinout for test:")
-print("    CE on", cfg["ce"])
-print("    CSN on", cfg["csn"])
-print("    SPI on", cfg["spi"])
-print("run nrf24l01test.responder() on responder, then nrf24l01test.initiator() on initiator")
