@@ -3,8 +3,8 @@
 import sys
 import struct
 import time
+import random
 from machine import Pin, SPI, SoftSPI
-#from drivers.nrf24l01 import NRF24L01
 from micropython import const
 
 # Responder pause between receiving data and checking for further packets.
@@ -25,30 +25,45 @@ class NrfTest():
         self.channel = channel
         self.power_string = power
         self.speed_string = speed
+        self.driver = None
+        self.power = None
+        self.speed = None
+        self.spi = None
+        self.cfg = None
+        self.nrf = None
+        self.all_systems_go = True
         self.import_driver()
         self.init_spi()
         self.init_nrf()
         self.report()
 
     def import_driver(self):
+        if not self.all_systems_go:
+            return
+
         try:
             self.driver = getattr(__import__(f"drivers.{self.driver_name}"), self.driver_name)
+            self.NRF24L01 = getattr(self.driver, "NRF24L01")
         except AttributeError:
             print(f"Unable to import driver {self.driver_name}")
 
-        try:
-            self.power = getattr(self.driver, self.power_string)
-        except AttributeError:
-            print(f"Unable to get attribute {self.power_string}")
+        if self.driver is not None:
+            try:
+                self.power = getattr(self.driver, self.power_string)
+            except AttributeError:
+                print(f"Unable to get attribute {self.power_string}")
+           
+            try:
+                self.speed = getattr(self.driver, self.speed_string)
+            except AttributeError:
+                print(f"Unable to get attribute {self.speed_string}")
 
-        try:
-            self.speed = getattr(self.driver, self.speed_string)
-        except AttributeError:
-            print(f"Unable to get attribute {self.speed_string}")
-
-        self.NRF24L01 = getattr(self.driver, "NRF24L01")
+        self.all_systems_go = not any(v is None for v in [self.driver, self.NRF24L01, self.power, self.speed])
 
     def init_spi(self):
+        if not self.all_systems_go:
+            return
+
         if sys.platform == "pyboard":
             spi = SPI(2)  # miso : Y7, mosi : Y8, sck : Y6
             cfg = {"spi": spi, "csn": "Y5", "ce": "Y4"}
@@ -60,39 +75,54 @@ class NrfTest():
             cfg = {"spi": spi, "csn": 26, "ce": 27}
         elif sys.platform == "rp2":  # Hardware SPI with explicit pin definitions
             spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
-            cfg = {"spi": spi, "csn": 17, "ce": 14}
+            cfg = {"spi": spi, "csn": 17, "ce": 14, "led": 25}
         else:
             raise ValueError(f"Unsupported platform {sys.platform}")
+
+        self.leds = []
+        if "led" in cfg:
+            self.leds.append(Pin(cfg["led"], Pin.OUT))
 
         cfg["ce"] = self.ce_gpio
         self.spi = spi
         self.cfg = cfg
 
+        self.all_systems_go = not any(v is None for v in [self.spi, self.cfg])
+
     def init_nrf(self):
+        if not self.all_systems_go:
+            return
+
         csn = Pin(self.cfg["csn"], mode=Pin.OUT, value=1)
         ce = Pin(self.cfg["ce"], mode=Pin.OUT, value=0)
         spi = self.cfg["spi"]
         self.nrf = self.NRF24L01(spi, csn, ce, payload_size=8, channel=self.channel)
         self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
-        self.nrf.set_power_speed(self.power, self.speed)
+        if self.power is not None and self.speed is not None:
+            self.nrf.set_power_speed(self.power, self.speed)
 
-    def initiator(self):
+        self.all_systems_go = not any(v is None for v in [self.nrf])
+
+    def initiator(self, num_needed=1):
+        if not self.all_systems_go:
+            print("ERROR: all systems are NOT go")
+            return
+
         self.nrf.open_tx_pipe(pipes[0])
         self.nrf.open_rx_pipe(1, pipes[1])
         self.nrf.start_listening()
 
-        num_needed = 1
         num_successes = 0
         num_failures = 0
         led_state = 0
 
-        print("NRF24L01 initiator mode, sending %d packets..." % num_needed)
+        print(f"NRF24L01 initiator mode, sending {num_needed} packets...")
 
         while num_successes < num_needed and num_failures < num_needed:
             # stop listening and send packet
             self.nrf.stop_listening()
             millis = time.ticks_ms()
-            led_state = max(1, (led_state << 1) & 0x0F)
+            led_state = random.randint(0, 15)
             print("sending:", millis, led_state)
             try:
                 self.nrf.send(struct.pack("ii", millis, led_state))
@@ -133,6 +163,10 @@ class NrfTest():
         print("initiator finished sending; successes=%d, failures=%d" % (num_successes, num_failures))
 
     def responder(self):
+        if not self.all_systems_go:
+            print("ERROR: all systems are NOT go")
+            return
+
         self.nrf.open_tx_pipe(pipes[1])
         self.nrf.open_rx_pipe(1, pipes[0])
         self.nrf.start_listening()
@@ -146,7 +180,7 @@ class NrfTest():
                     buf = self.nrf.recv()
                     millis, led_state = struct.unpack("ii", buf)
                     print("received:", millis, led_state)
-                    for led in leds:
+                    for led in self.leds:
                         if led_state & 1:
                             led.on()
                         else:
@@ -166,16 +200,13 @@ class NrfTest():
                 self.nrf.start_listening()
 
     def report(self):
+        if not self.all_systems_go:
+            print("ERROR: all systems are NOT go")
+            return
+
         print("NRF24L01 test module loaded")
         print("NRF24L01 pinout for test:")
         print("    CE on", self.cfg["ce"])
         print("    CSN on", self.cfg["csn"])
         print("    SPI on", self.cfg["spi"])
-        print("run <object>.responder() on responder, then <object>.initiator() on initiator")
-
-try:
-    import pyb
-
-    leds = [pyb.LED(i + 1) for i in range(4)]
-except:
-    leds = []
+        print("run <object>.responder() on responder, then <object>.initiator(num) on initiator")
