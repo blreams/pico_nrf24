@@ -1,15 +1,17 @@
 """Test for nrf24l01 module.  Portable between MicroPython targets."""
 
 import sys
+import os
 import struct
 import time
 import random
 from machine import Pin, SPI, SoftSPI
 from micropython import const
 
-# Responder pause between receiving data and checking for further packets.
+# Responder pause (in ms) between receiving data and checking for further packets.
 _RX_POLL_DELAY = const(15)
-# Responder pauses an additional _RESPONER_SEND_DELAY ms after receiving data and before
+
+# Responder pauses an additional _RESPONDER_SEND_DELAY ms after receiving data and before
 # transmitting to allow the (remote) initiator time to get into receive mode. The
 # initiator may be a slow device. Value tested with Pyboard, ESP32 and ESP8266.
 _RESPONDER_SEND_DELAY = const(10)
@@ -18,20 +20,33 @@ _RESPONDER_SEND_DELAY = const(10)
 # 0xf0f0f0f0e1, 0xf0f0f0f0d2
 pipes = (b"\xe1\xf0\xf0\xf0\xf0", b"\xd2\xf0\xf0\xf0\xf0")
 
+def all_not_none(items):
+    """Return True if ALL items are not None."""
+    return not any(v is None for v in items)
+
 class NrfTest():
-    def __init__(self, driver_name, ce_gpio, channel, power, speed):
+    def __init__(
+        self, 
+        driver_name="nrf24l01", 
+        ce_gpio=20, 
+        channel=78, 
+        power="POWER_1", 
+        speed="SPEED_1M",
+    ):
         self.driver_name = driver_name
         self.ce_gpio = ce_gpio
         self.channel = channel
-        self.power_string = power
-        self.speed_string = speed
+        self.power = power
+        self.speed = speed
+        self.all_systems_go = True
         self.driver = None
-        self.power = None
-        self.speed = None
+        self.power_enum = None
+        self.speed_enum = None
+        self.NRF24L01 = None
         self.spi = None
         self.cfg = None
         self.nrf = None
-        self.all_systems_go = True
+        self.valid_driver_names = [fn.rsplit(".", 1)[0] for fn in os.listdir("drivers") if fn.startswith("nrf24l01") and fn.endswith(".py")]
         self.import_driver()
         self.init_spi()
         self.init_nrf()
@@ -41,24 +56,27 @@ class NrfTest():
         if not self.all_systems_go:
             return
 
-        try:
-            self.driver = getattr(__import__(f"drivers.{self.driver_name}"), self.driver_name)
-            self.NRF24L01 = getattr(self.driver, "NRF24L01")
-        except AttributeError:
-            print(f"Unable to import driver {self.driver_name}")
+        if self.driver_name in self.valid_driver_names:
+            try:
+                self.driver = getattr(__import__(f"drivers.{self.driver_name}"), self.driver_name)
+                self.NRF24L01 = getattr(self.driver, "NRF24L01")
+            except AttributeError:
+                print(f"Unable to import driver {self.driver_name}")
+        else:
+            print(f"Invalid driver name {self.driver_name}, must be one of {self.valid_driver_names}")
 
         if self.driver is not None:
             try:
-                self.power = getattr(self.driver, self.power_string)
+                self.power_enum = getattr(self.driver, self.power)
             except AttributeError:
-                print(f"Unable to get attribute {self.power_string}")
-           
-            try:
-                self.speed = getattr(self.driver, self.speed_string)
-            except AttributeError:
-                print(f"Unable to get attribute {self.speed_string}")
+                print(f"Unable to get attribute {self.power}")
 
-        self.all_systems_go = not any(v is None for v in [self.driver, self.NRF24L01, self.power, self.speed])
+            try:
+                self.speed_enum = getattr(self.driver, self.speed)
+            except AttributeError:
+                print(f"Unable to get attribute {self.speed}")
+
+        self.all_systems_go = all_not_none([self.driver, self.NRF24L01, self.power_enum, self.speed_enum])
 
     def init_spi(self):
         if not self.all_systems_go:
@@ -87,7 +105,7 @@ class NrfTest():
         self.spi = spi
         self.cfg = cfg
 
-        self.all_systems_go = not any(v is None for v in [self.spi, self.cfg])
+        self.all_systems_go = all_not_none([self.spi, self.cfg])
 
     def init_nrf(self):
         if not self.all_systems_go:
@@ -98,10 +116,10 @@ class NrfTest():
         spi = self.cfg["spi"]
         self.nrf = self.NRF24L01(spi, csn, ce, payload_size=8, channel=self.channel)
         self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
-        if self.power is not None and self.speed is not None:
-            self.nrf.set_power_speed(self.power, self.speed)
+        if self.power_enum is not None and self.speed_enum is not None:
+            self.nrf.set_power_speed(self.power_enum, self.speed_enum)
 
-        self.all_systems_go = not any(v is None for v in [self.nrf])
+        self.all_systems_go = all_not_none([self.nrf])
 
     def initiator(self, num_needed=1):
         if not self.all_systems_go:
@@ -158,9 +176,9 @@ class NrfTest():
                 num_successes += 1
 
             # delay then loop
-            time.sleep_ms(250)
+            time.sleep_ms(25)
 
-        print("initiator finished sending; successes=%d, failures=%d" % (num_successes, num_failures))
+        print(f"initiator finished sending; successes={num_successes}, failures={num_failures}")
 
     def responder(self):
         if not self.all_systems_go:
@@ -206,7 +224,12 @@ class NrfTest():
 
         print("NRF24L01 test module loaded")
         print("NRF24L01 pinout for test:")
-        print("    CE on", self.cfg["ce"])
-        print("    CSN on", self.cfg["csn"])
-        print("    SPI on", self.cfg["spi"])
+        print(f"    CE={self.cfg["ce"]}")
+        print(f"    CSN={self.cfg["csn"]}")
+        print(f"    SPI={self.cfg["spi"]}")
+        print("NRF24L01 attributes for test:")
+        print(f"    driver_name={self.driver_name}")
+        print(f"    channel={self.channel}")
+        print(f"    power={self.power}")
+        print(f"    speed={self.speed}")
         print("run <object>.responder() on responder, then <object>.initiator(num) on initiator")
