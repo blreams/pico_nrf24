@@ -26,11 +26,11 @@ def all_not_none(items):
 
 class NrfTest():
     def __init__(
-        self, 
-        driver_name="nrf24l01", 
-        ce_gpio=20, 
-        channel=78, 
-        power="POWER_1", 
+        self,
+        driver_name="nrf24l01",
+        ce_gpio=20,
+        channel=78,
+        power="POWER_1",
         speed="SPEED_1M",
     ):
         self.driver_name = driver_name
@@ -136,7 +136,7 @@ class NrfTest():
 
         print(f"NRF24L01 initiator mode, sending {num_needed} packets...")
 
-        while num_successes < num_needed and num_failures < num_needed:
+        while (num_successes + num_failures) < num_needed:
             # stop listening and send packet
             self.nrf.stop_listening()
             millis = time.ticks_ms()
