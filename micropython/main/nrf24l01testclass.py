@@ -27,17 +27,19 @@ def all_not_none(items):
 class NrfTest():
     def __init__(
         self,
-        driver_name="nrf24l01",
-        ce_gpio=20,
-        channel=78,
-        power="POWER_1",
-        speed="SPEED_1M",
+        driver_name="nrf24l01",  # use this named driver from drivers folder
+        ce_gpio=20,  # this is the gpio used for CE (chip_enable)
+        channel=78,  # sets rf24 radio channel to this value
+        power="POWER_1",  # enum for radio power
+        speed="SPEED_1M",  # enum for radio speed
+        trig_gpio=28,  # gpio used for trigger out
     ):
         self.driver_name = driver_name
         self.ce_gpio = ce_gpio
         self.channel = channel
         self.power = power
         self.speed = speed
+        self.trig_gpio = trig_gpio
         self.all_systems_go = True
         self.driver = None
         self.power_enum = None
@@ -50,6 +52,7 @@ class NrfTest():
         self.import_driver()
         self.init_spi()
         self.init_nrf()
+        self.init_gpio()
         self.report()
 
     def import_driver(self):
@@ -121,6 +124,30 @@ class NrfTest():
 
         self.all_systems_go = all_not_none([self.nrf])
 
+    def init_gpio(self):
+        self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
+        self.trig = Pin(self.trig_gpio, mode=Pin.OUT, value=0)
+
+    def program_power(self, power):
+        self.power = power
+        try:
+            self.power_enum = getattr(self.driver, self.power)
+        except AttributeError:
+            print(f"Unable to get attribute {self.power}")
+            return
+        self.nrf.set_power_speed(self.power_enum, self.speed_enum)
+        print(f"radio power/speed set to {self.power}/{self.speed}")
+
+    def program_speed(self, speed):
+        self.speed = speed
+        try:
+            self.speed_enum = getattr(self.driver, self.speed)
+        except AttributeError:
+            print(f"Unable to get attribute {self.speed}")
+            return
+        self.nrf.set_power_speed(self.power_enum, self.speed_enum)
+        print(f"radio power/speed set to {self.power}/{self.speed}")
+
     def initiator(self, num_needed=1):
         if not self.all_systems_go:
             print("ERROR: all systems are NOT go")
@@ -142,6 +169,7 @@ class NrfTest():
             millis = time.ticks_ms()
             led_state = random.randint(0, 15)
             print("sending:", millis, led_state)
+            self.trig.on()
             try:
                 self.nrf.send(struct.pack("ii", millis, led_state))
             except OSError:
@@ -149,6 +177,8 @@ class NrfTest():
 
             # start listening again
             self.nrf.start_listening()
+            self.trig.off()
+            print(f"sending complete, status={self.nrf.send_done_status:x}")
 
             # wait for response, with 250ms timeout
             start_time = time.ticks_ms()
@@ -176,7 +206,7 @@ class NrfTest():
                 num_successes += 1
 
             # delay then loop
-            time.sleep_ms(25)
+            time.sleep_ms(250)
 
         print(f"initiator finished sending; successes={num_successes}, failures={num_failures}")
 

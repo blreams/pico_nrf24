@@ -55,6 +55,7 @@ class NRF24L01:
         assert payload_size <= 32
 
         self.buf = bytearray(1)
+        self.send_done_status = 0
 
         # store the pins
         self.spi = spi
@@ -248,6 +249,6 @@ class NRF24L01:
             return None  # tx not finished
 
         # either finished or failed: get and clear status flags, power down
-        status = self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
+        self.send_done_status = self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
         self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)
-        return 1 if status & TX_DS else 2
+        return 1 if self.send_done_status & TX_DS else 2
