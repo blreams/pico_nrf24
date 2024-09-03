@@ -92,8 +92,8 @@ class NrfTest():
             spi = SPI(1)  # miso : 12, mosi : 13, sck : 14
             cfg = {"spi": spi, "csn": 4, "ce": 5}
         elif sys.platform == "esp32":  # Software SPI
-            spi = SoftSPI(sck=Pin(25), mosi=Pin(33), miso=Pin(32))
-            cfg = {"spi": spi, "csn": 26, "ce": 27}
+            spi = SoftSPI(sck=Pin(18), mosi=Pin(23), miso=Pin(19))
+            cfg = {"spi": spi, "csn": 5, "ce": 4}
         elif sys.platform == "rp2":  # Hardware SPI with explicit pin definitions
             spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
             cfg = {"spi": spi, "csn": 17, "ce": 14, "led": 25}
