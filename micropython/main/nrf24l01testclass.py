@@ -118,14 +118,12 @@ class NrfTest():
         ce = Pin(self.cfg["ce"], mode=Pin.OUT, value=0)
         spi = self.cfg["spi"]
         self.nrf = self.NRF24L01(spi, csn, ce, payload_size=8, channel=self.channel)
-        self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
         if self.power_enum is not None and self.speed_enum is not None:
             self.nrf.set_power_speed(self.power_enum, self.speed_enum)
 
         self.all_systems_go = all_not_none([self.nrf])
 
     def init_gpio(self):
-        self.gpio10 = Pin(10, mode=Pin.OUT, value=0)
         self.trig = Pin(self.trig_gpio, mode=Pin.OUT, value=0)
 
     def program_power(self, power):
@@ -223,7 +221,7 @@ class NrfTest():
 
         while True:
             if self.nrf.any():
-                self.gpio10.value(1)
+                self.trig.on()
                 while self.nrf.any():
                     buf = self.nrf.recv()
                     millis, led_state = struct.unpack("ii", buf)
@@ -243,7 +241,7 @@ class NrfTest():
                     self.nrf.send(struct.pack("i", millis))
                 except OSError:
                     pass
-                self.gpio10.value(0)
+                self.trig.off()
                 print("sent response")
                 self.nrf.start_listening()
 
