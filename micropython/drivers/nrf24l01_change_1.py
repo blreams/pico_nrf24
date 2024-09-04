@@ -394,9 +394,10 @@ class NRF24L01:
         self.cs(0)
         self.spi.readinto(self.buf, W_TX_PAYLOAD)
         self.spi.write(buf)
+        self.cs(1)
         if len(buf) < self.payload_size:
             self.spi.write(b"\x00" * (self.payload_size - len(buf)))  # pad out data
-        self.cs(1)
+        #self.cs(1)
 
         # enable the chip so it can send the data
         self.ce(1)
