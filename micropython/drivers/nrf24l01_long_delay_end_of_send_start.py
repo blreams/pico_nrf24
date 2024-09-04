@@ -59,7 +59,7 @@ def address_repr(buf, reverse: bool = True, delimit: str = "") -> str:
 
 
 class NRF24L01:
-    def __init__(self, spi, cs, ce, channel=46, payload_size=16):
+    def __init__(self, spi, cs, ce, channel=46, payload_size=16, baudrate=4000000):
         assert payload_size <= 32
 
         self.buf = bytearray(1)
@@ -71,7 +71,7 @@ class NRF24L01:
         self.ce = ce
 
         # init the SPI bus and pins
-        self.init_spi(4000000)
+        self.init_spi(baudrate)
 
         # reset everything
         ce.init(ce.OUT, value=0)
@@ -381,7 +381,6 @@ class NRF24L01:
         result = None
         while result is None and utime.ticks_diff(utime.ticks_ms(), start) < timeout:
             result = self.send_done()  # 1 == success, 2 == fail
-            utime.sleep_us(800)  # add delay to get past interference between csn assertion and ack receive
         if result == 2:
             raise OSError("send failed")
 
@@ -402,6 +401,9 @@ class NRF24L01:
         self.ce(1)
         utime.sleep_us(15)  # needs to be >10us
         self.ce(0)
+
+        # Try a long delay here to allow responder ack to be seen w/o csn interference
+        utime.sleep_us(2000)
 
     # returns None if send still in progress, 1 for success, 2 for fail
     def send_done(self):

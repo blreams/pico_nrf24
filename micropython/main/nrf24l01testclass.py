@@ -167,7 +167,7 @@ class NrfTest():
             millis = time.ticks_ms()
             led_state = random.randint(0, 15)
             print("sending:", millis, led_state)
-            self.trig.on()
+            #self.trig.on()
             try:
                 self.nrf.send(struct.pack("ii", millis, led_state))
             except OSError:
@@ -175,7 +175,7 @@ class NrfTest():
 
             # start listening again
             self.nrf.start_listening()
-            self.trig.off()
+            #self.trig.off()
             print(f"sending complete, status={self.nrf.send_done_status:x}")
 
             # wait for response, with 250ms timeout
@@ -186,8 +186,11 @@ class NrfTest():
                     timeout = True
 
             if timeout:
+                self.trig.on()
                 print("failed, response timed out")
                 num_failures += 1
+                self.trig.off()
+                break
 
             else:
                 # recv packet
